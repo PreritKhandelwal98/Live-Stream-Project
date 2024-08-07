@@ -4,7 +4,6 @@ import io from 'socket.io-client';
 const ViewerStream = () => {
     const videoRef = useRef(null);
     const [mediaSource, setMediaSource] = useState(null);
-    const [sourceBuffer, setSourceBuffer] = useState(null);
     const [bufferQueue, setBufferQueue] = useState([]);
     const [usersCount, setUsersCount] = useState(0);
     const [likeCount, setLikeCount] = useState(0);
@@ -22,8 +21,9 @@ const ViewerStream = () => {
         });
 
         socket.current.on('streamData', (data) => {
-            console.log('Received stream data:', data);
-            appendBuffer(new Uint8Array(data));
+            const blob = new Blob([data], { type: 'video/webm' });
+            const url = URL.createObjectURL(blob);
+            videoRef.current.src = url;
         });
 
         socket.current.on('chat message', (msg) => {
@@ -47,80 +47,6 @@ const ViewerStream = () => {
         };
     }, []);
 
-    useEffect(() => {
-        if (videoRef.current) {
-            const ms = new MediaSource();
-            videoRef.current.src = URL.createObjectURL(ms);
-
-            ms.addEventListener('sourceopen', () => {
-                console.log('MediaSource sourceopen event fired');
-                const sb = ms.addSourceBuffer('video/webm; codecs="vp8, vorbis"');
-
-                sb.addEventListener('updateend', () => {
-                    console.log('SourceBuffer updateend event fired');
-                    processBufferQueue();
-                });
-
-                sb.addEventListener('error', (e) => {
-                    console.error('SourceBuffer error:', e);
-                });
-
-                setMediaSource(ms);
-                setSourceBuffer(sb);
-                console.log('MediaSource and SourceBuffer initialized');
-            });
-
-            ms.addEventListener('error', (e) => {
-                console.error('MediaSource error:', e);
-            });
-        }
-    }, [videoRef]);
-
-    const appendBuffer = (data) => {
-        if (sourceBuffer && !sourceBuffer.updating && mediaSource.readyState === 'open') {
-            try {
-                console.log('Appending buffer data');
-                sourceBuffer.appendBuffer(data);
-            } catch (e) {
-                console.error('Error appending buffer:', e);
-                resetMediaSource();
-            }
-        } else {
-            console.log('Queueing buffer data');
-            setBufferQueue((prevQueue) => [...prevQueue, data]);
-        }
-    };
-
-    const processBufferQueue = () => {
-        if (bufferQueue.length > 0 && sourceBuffer && !sourceBuffer.updating) {
-            try {
-                console.log('Processing buffer queue');
-                const data = bufferQueue.shift();
-                sourceBuffer.appendBuffer(data);
-            } catch (e) {
-                console.error('Error processing buffer queue:', e);
-                resetMediaSource();
-            }
-        }
-    };
-
-    const resetMediaSource = () => {
-        if (mediaSource) {
-            if (mediaSource.readyState === 'open') {
-                try {
-                    mediaSource.endOfStream();
-                } catch (e) {
-                    console.error('Error ending MediaSource:', e);
-                }
-            }
-            setMediaSource(null);
-            setSourceBuffer(null);
-            setBufferQueue([]);
-            videoRef.current.src = '';
-            console.log('MediaSource reset');
-        }
-    };
-
     const sendMessage = () => {
         socket.current.emit('chat message', { user: 'Viewer', message });
         setMessage('');
@@ -137,7 +63,7 @@ const ViewerStream = () => {
     return (
         <div>
             <h2>Viewer Stream</h2>
-            <p>Viewers: {usersCount}</p>
+            <p>Users Count: {usersCount}</p>
             <video ref={videoRef} autoPlay controls></video>
             <div>
                 <button onClick={handleLike}>Like</button>

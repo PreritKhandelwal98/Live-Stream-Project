@@ -5,8 +5,6 @@ const AdminStream = () => {
     const [message, setMessage] = useState('');
     const [messages, setMessages] = useState([]);
     const [usersCount, setUsersCount] = useState(0);
-    const [likes, setLikes] = useState(0);
-    const [dislikes, setDislikes] = useState(0);
     const [streaming, setStreaming] = useState(false);
     const [mediaRecorder, setMediaRecorder] = useState(null);
     const videoRef = useRef(null);
@@ -17,7 +15,7 @@ const AdminStream = () => {
         socket.current = io('http://localhost:5000');
 
         socket.current.on('connect', () => {
-            // console.log('Connected to server');
+            console.log('Connected to server');
             socket.current.emit('join', { role: 'admin' });
         });
 
@@ -29,36 +27,20 @@ const AdminStream = () => {
             setUsersCount(count);
         });
 
-        socket.current.on('likes', (count) => {
-            setLikes(count);
-        });
-
-        socket.current.on('dislikes', (count) => {
-            setDislikes(count);
-        });
-
-        socket.current.on('streamData', (data) => {
-            // console.log('Received stream data');
-            // Handle stream data here if needed
-        });
-
         return () => {
             socket.current.disconnect();
         };
     }, []);
 
     const sendMessage = () => {
-        // console.log('Sending message:', message);
         socket.current.emit('chat message', { user: 'Admin', message });
         setMessage('');
     };
 
     const startStreaming = () => {
-        // console.log('Starting streaming...');
         setStreaming(true);
         navigator.mediaDevices.getUserMedia({ video: true, audio: true })
             .then(stream => {
-                // console.log('Media stream obtained');
                 streamRef.current = stream;
                 videoRef.current.srcObject = stream;
                 const recorder = new MediaRecorder(stream);
@@ -66,13 +48,11 @@ const AdminStream = () => {
                 let recordedChunks = [];
                 recorder.ondataavailable = (event) => {
                     if (event.data.size > 0) {
-                        // console.log('Data available:', event.data.size);
                         recordedChunks.push(event.data);
                         socket.current.emit('streamData', event.data);
                     }
                 };
                 recorder.onstop = async () => {
-                    // console.log('Recording stopped');
                     const blob = new Blob(recordedChunks, { type: 'video/webm' });
                     const file = new File([blob], 'stream.webm', { type: 'video/webm' });
 
@@ -86,22 +66,19 @@ const AdminStream = () => {
                             body: formData
                         });
                         const result = await response.json();
-                        // console.log('Uploaded to Cloudinary:', result.url);
+                        console.log('Uploaded to Cloudinary:', result.url);
                     } catch (error) {
                         console.error('Error uploading video:', error);
                     }
-
                 };
                 recorder.start(1000); // Send data every second
-                // console.log('Recorder started');
             })
             .catch(error => {
-                console.error('Error accessing media devices:', error);
+                console.error('Error accessing media devices.', error);
             });
     };
 
     const stopStreaming = () => {
-        // console.log('Stopping streaming...');
         if (mediaRecorder) {
             mediaRecorder.stop();
         }
@@ -115,7 +92,7 @@ const AdminStream = () => {
     return (
         <div>
             <h2>Admin Stream</h2>
-            <p>Viewers: {usersCount}</p>
+            <p>Users Count: {usersCount}</p>
             <video ref={videoRef} autoPlay playsInline></video>
             <button onClick={streaming ? stopStreaming : startStreaming}>
                 {streaming ? 'Stop Streaming' : 'Start Streaming'}
