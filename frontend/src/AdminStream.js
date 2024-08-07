@@ -27,20 +27,28 @@ const AdminStream = () => {
             setUsersCount(count);
         });
 
+        socket.current.on('streamData', (data) => {
+            console.log('Received stream data');
+            // Handle stream data here if needed
+        });
+
         return () => {
             socket.current.disconnect();
         };
     }, []);
 
     const sendMessage = () => {
+        console.log('Sending message:', message);
         socket.current.emit('chat message', { user: 'Admin', message });
         setMessage('');
     };
 
     const startStreaming = () => {
+        console.log('Starting streaming...');
         setStreaming(true);
         navigator.mediaDevices.getUserMedia({ video: true, audio: true })
             .then(stream => {
+                console.log('Media stream obtained');
                 streamRef.current = stream;
                 videoRef.current.srcObject = stream;
                 const recorder = new MediaRecorder(stream);
@@ -48,11 +56,13 @@ const AdminStream = () => {
                 let recordedChunks = [];
                 recorder.ondataavailable = (event) => {
                     if (event.data.size > 0) {
+                        console.log('Data available:', event.data.size);
                         recordedChunks.push(event.data);
                         socket.current.emit('streamData', event.data);
                     }
                 };
                 recorder.onstop = async () => {
+                    console.log('Recording stopped');
                     const blob = new Blob(recordedChunks, { type: 'video/webm' });
                     const file = new File([blob], 'stream.webm', { type: 'video/webm' });
 
@@ -72,13 +82,15 @@ const AdminStream = () => {
                     }
                 };
                 recorder.start(1000); // Send data every second
+                console.log('Recorder started');
             })
             .catch(error => {
-                console.error('Error accessing media devices.', error);
+                console.error('Error accessing media devices:', error);
             });
     };
 
     const stopStreaming = () => {
+        console.log('Stopping streaming...');
         if (mediaRecorder) {
             mediaRecorder.stop();
         }
@@ -92,7 +104,7 @@ const AdminStream = () => {
     return (
         <div>
             <h2>Admin Stream</h2>
-            <p>Users Count: {usersCount}</p>
+            <p>Viewers: {usersCount}</p>
             <video ref={videoRef} autoPlay playsInline></video>
             <button onClick={streaming ? stopStreaming : startStreaming}>
                 {streaming ? 'Stop Streaming' : 'Start Streaming'}

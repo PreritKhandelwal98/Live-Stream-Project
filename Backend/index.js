@@ -5,12 +5,16 @@ const cors = require('cors');
 const multer = require('multer');
 const cloudinary = require('cloudinary').v2;
 const path = require('path');
+const { Readable } = require('stream');
+const dotenv = require('dotenv')
+
+dotenv.config();
 
 // Initialize Cloudinary
 cloudinary.config({
-    cloud_name: 'your_cloud_name',
-    api_key: 'your_api_key',
-    api_secret: 'your_api_secret'
+    cloud_name: process.env.cloud_name,
+    api_key: process.env.api_key,
+    api_secret: process.env.api_secret
 });
 
 const app = express();
@@ -40,24 +44,34 @@ const userLikes = {}; // Track likes/dislikes per user
 const storage = multer.memoryStorage();
 const upload = multer({ storage: storage });
 
-app.post('/upload', upload.single('file'), async (req, res) => {
-    try {
-        const result = await cloudinary.uploader.upload_stream(
-            { resource_type: 'video', public_id: path.basename(req.file.originalname, path.extname(req.file.originalname)) },
-            (error, result) => {
-                if (error) {
-                    console.error('Cloudinary upload error:', error);
-                    return res.status(500).json({ error: error.message });
-                }
-                res.json({ url: result.secure_url });
-            }
-        );
-        req.file.stream.pipe(result);
-    } catch (error) {
-        console.error('Upload error:', error);
-        res.status(500).json({ error: error.message });
+app.post('/upload', upload.single('file'), (req, res) => {
+    console.log('Upload endpoint hit');
+    console.log('File object:', req.file);
+
+    if (!req.file) {
+        console.log('No file uploaded');
+        return res.status(400).json({ error: 'No file uploaded' });
     }
+
+    const bufferStream = new Readable();
+    bufferStream.push(req.file.buffer);
+    bufferStream.push(null); // Indicate end of stream
+
+    const uploadStream = cloudinary.uploader.upload_stream(
+        { resource_type: 'video', public_id: path.basename(req.file.originalname, path.extname(req.file.originalname)) },
+        (error, result) => {
+            if (error) {
+                console.error('Cloudinary upload error:', error);
+                return res.status(500).json({ error: error.message });
+            }
+            console.log('Cloudinary upload result:', result);
+            res.json({ url: result.secure_url });
+        }
+    );
+
+    bufferStream.pipe(uploadStream);
 });
+
 
 io.on('connection', (socket) => {
     console.log('A user connected', socket.id);
