@@ -5,6 +5,7 @@ const AdminStream = () => {
     const [message, setMessage] = useState('');
     const [messages, setMessages] = useState([]);
     const [usersCount, setUsersCount] = useState(0);
+    const [streamId, setStreamId] = useState('');
     const [streaming, setStreaming] = useState(false);
     const [mediaRecorder, setMediaRecorder] = useState(null);
     const videoRef = useRef(null);
@@ -16,20 +17,66 @@ const AdminStream = () => {
 
         socket.current.on('connect', () => {
             console.log('Connected to server');
-            socket.current.emit('join', { role: 'admin' });
+        });
+
+        socket.current.on('stream started', (id) => {
+            console.log('Stream started with ID:', id);
+            setStreamId(id);
+            setStreaming(true);
+            navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+                .then(stream => {
+                    streamRef.current = stream;
+                    videoRef.current.srcObject = stream;
+                    const recorder = new MediaRecorder(stream);
+                    setMediaRecorder(recorder);
+                    let recordedChunks = [];
+                    recorder.ondataavailable = (event) => {
+                        if (event.data.size > 0) {
+                            recordedChunks.push(event.data);
+                            socket.current.emit('streamData', streamId, event.data);
+                        }
+                    };
+                    recorder.onstop = async () => {
+                        const blob = new Blob(recordedChunks, { type: 'video/webm' });
+                        const file = new File([blob], 'stream.webm', { type: 'video/webm' });
+
+                        const formData = new FormData();
+                        formData.append('file', file);
+
+                        try {
+                            const response = await fetch('http://localhost:5000/upload', {
+                                method: 'POST',
+                                body: formData
+                            });
+                            const result = await response.json();
+                            console.log('Uploaded to Cloudinary:', result.url);
+                        } catch (error) {
+                            console.error('Error uploading video:', error);
+                        }
+                    };
+                    recorder.start(1000);
+                })
+                .catch(error => console.error('Error accessing media devices.', error));
         });
 
         socket.current.on('chat message', (msg) => {
-            setMessages((prevMessages) => [...prevMessages, msg]);
+            console.log('Received chat message:', msg);
+            setMessages(prevMessages => [...prevMessages, msg]);
         });
 
         socket.current.on('users count', (count) => {
+            console.log('Received users count:', count);
             setUsersCount(count);
         });
 
-        socket.current.on('streamData', (data) => {
-            console.log('Received stream data');
-            // Handle stream data here if needed
+        socket.current.on('like', (count) => {
+            console.log('Received like count:', count);
+            setLikeCount(count);
+        });
+
+        socket.current.on('dislike', (count) => {
+            console.log('Received dislike count:', count);
+            setDislikeCount(count);
         });
 
         return () => {
@@ -37,78 +84,47 @@ const AdminStream = () => {
         };
     }, []);
 
-    const sendMessage = () => {
-        console.log('Sending message:', message);
-        socket.current.emit('chat message', { user: 'Admin', message });
-        setMessage('');
-    };
-
-    const startStreaming = () => {
-        console.log('Starting streaming...');
-        setStreaming(true);
-        navigator.mediaDevices.getUserMedia({ video: true, audio: true })
-            .then(stream => {
-                console.log('Media stream obtained');
-                streamRef.current = stream;
-                videoRef.current.srcObject = stream;
-                const recorder = new MediaRecorder(stream);
-                setMediaRecorder(recorder);
-                let recordedChunks = [];
-                recorder.ondataavailable = (event) => {
-                    if (event.data.size > 0) {
-                        console.log('Data available:', event.data.size);
-                        recordedChunks.push(event.data);
-                        socket.current.emit('streamData', event.data);
-                    }
-                };
-                recorder.onstop = async () => {
-                    console.log('Recording stopped');
-                    const blob = new Blob(recordedChunks, { type: 'video/webm' });
-                    const file = new File([blob], 'stream.webm', { type: 'video/webm' });
-
-                    // Upload to backend
-                    const formData = new FormData();
-                    formData.append('file', file);
-
-                    try {
-                        const response = await fetch('http://localhost:5000/upload', {
-                            method: 'POST',
-                            body: formData
-                        });
-                        const result = await response.json();
-                        console.log('Uploaded to Cloudinary:', result.url);
-                    } catch (error) {
-                        console.error('Error uploading video:', error);
-                    }
-                };
-                recorder.start(1000); // Send data every second
-                console.log('Recorder started');
-            })
-            .catch(error => {
-                console.error('Error accessing media devices:', error);
-            });
+    const handleStartStream = () => {
+        if (!streaming) {
+            socket.current.emit('start stream');
+        }
     };
 
     const stopStreaming = () => {
-        console.log('Stopping streaming...');
         if (mediaRecorder) {
             mediaRecorder.stop();
         }
         if (streamRef.current) {
-            streamRef.current.getTracks().forEach(track => track.stop()); // Stop all tracks
+            streamRef.current.getTracks().forEach(track => track.stop());
             videoRef.current.srcObject = null;
         }
         setStreaming(false);
     };
 
+    const sendMessage = () => {
+        if (streamId && message.trim()) {
+            socket.current.emit('chat message', streamId, { user: 'Admin', message });
+            setMessage('');
+        }
+    };
+
     return (
         <div>
             <h2>Admin Stream</h2>
+            <button onClick={handleStartStream}>
+                {streaming ? 'Stream Started' : 'Start Stream'}
+            </button>
+            {streamId && (
+                <div>
+                    <p>Stream ID: <strong>{streamId}</strong></p>
+                    <button onClick={() => navigator.clipboard.writeText(streamId)}>Copy Stream ID</button>
+                </div>
+            )}
             <p>Viewers: {usersCount}</p>
             <video ref={videoRef} autoPlay playsInline></video>
-            <button onClick={streaming ? stopStreaming : startStreaming}>
-                {streaming ? 'Stop Streaming' : 'Start Streaming'}
-            </button>
+            {streaming && (
+                <button onClick={stopStreaming}>Stop Streaming</button>
+            )}
             <div>
                 <h3>Chat</h3>
                 <div id="chat">

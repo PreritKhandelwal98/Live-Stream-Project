@@ -6,7 +6,8 @@ const multer = require('multer');
 const cloudinary = require('cloudinary').v2;
 const path = require('path');
 const { Readable } = require('stream');
-const dotenv = require('dotenv')
+const crypto = require('crypto');
+const dotenv = require('dotenv');
 
 dotenv.config();
 
@@ -35,10 +36,13 @@ const io = socketIo(server, {
     }
 });
 
-let usersCount = 0;
-let likeCount = 0;
-let dislikeCount = 0;
+const streams = {}; // Maps stream IDs to stream data
 const userLikes = {}; // Track likes/dislikes per user
+
+// Generate a unique stream ID
+const generateStreamId = () => {
+    return crypto.randomBytes(8).toString('hex'); // 16-character unique ID
+};
 
 // Multer setup for file uploads
 const storage = multer.memoryStorage();
@@ -72,85 +76,84 @@ app.post('/upload', upload.single('file'), (req, res) => {
     bufferStream.pipe(uploadStream);
 });
 
-
 io.on('connection', (socket) => {
     console.log('A user connected', socket.id);
-    usersCount++;
-    io.emit('users count', usersCount);
 
-    socket.on('join', () => {
-        console.log('User joined:', socket.id);
-        socket.join('stream');
+    socket.on('start stream', () => {
+        const streamId = generateStreamId();
+        console.log('Stream started:', streamId);
+        streams[streamId] = {
+            userCount: 0,
+            likeCount: 0,
+            dislikeCount: 0
+        };
+        socket.emit('stream started', streamId);
     });
 
-    socket.on('chat message', (msg) => {
-        console.log('Chat message received:', msg);
-        io.to('stream').emit('chat message', msg);
-    });
-
-    socket.on('like', (userId) => {
-        console.log('Like received from', userId);
-        if (userLikes[userId] === 'dislike') {
-            dislikeCount--;
+    socket.on('join stream', (streamId) => {
+        console.log('User joined stream:', streamId);
+        if (streams[streamId]) {
+            streams[streamId].userCount++;
+            socket.join(streamId);
+            io.to(streamId).emit('users count', streams[streamId].userCount);
         }
-        if (userLikes[userId] !== 'like') {
-            likeCount++;
+    });
+
+    socket.on('chat message', (streamId, msg) => {
+        console.log('Chat message received for stream', streamId, ':', msg);
+        io.to(streamId).emit('chat message', msg);
+    });
+
+    socket.on('like', (streamId, userId) => {
+        console.log('Like received for stream', streamId, 'from', userId);
+        if (!streams[streamId]) return;
+
+        if (userLikes[userId] === streamId) {
+            streams[streamId].likeCount++;
+        } else if (userLikes[userId] === 'dislike') {
+            streams[streamId].dislikeCount--;
+            streams[streamId].likeCount++;
+        } else {
             userLikes[userId] = 'like';
+            streams[streamId].likeCount++;
         }
-        io.to('stream').emit('like', likeCount);
-        io.to('stream').emit('dislike', dislikeCount);
+
+        io.to(streamId).emit('like', streams[streamId].likeCount);
+        io.to(streamId).emit('dislike', streams[streamId].dislikeCount);
     });
 
-    socket.on('dislike', (userId) => {
-        console.log('Dislike received from', userId);
-        if (userLikes[userId] === 'like') {
-            likeCount--;
-        }
-        if (userLikes[userId] !== 'dislike') {
-            dislikeCount++;
+    socket.on('dislike', (streamId, userId) => {
+        console.log('Dislike received for stream', streamId, 'from', userId);
+        if (!streams[streamId]) return;
+
+        if (userLikes[userId] === streamId) {
+            streams[streamId].dislikeCount++;
+        } else if (userLikes[userId] === 'like') {
+            streams[streamId].likeCount--;
+            streams[streamId].dislikeCount++;
+        } else {
             userLikes[userId] = 'dislike';
+            streams[streamId].dislikeCount++;
         }
-        io.to('stream').emit('like', likeCount);
-        io.to('stream').emit('dislike', dislikeCount);
+
+        io.to(streamId).emit('like', streams[streamId].likeCount);
+        io.to(streamId).emit('dislike', streams[streamId].dislikeCount);
     });
 
-    socket.on('streamData', (data) => {
-        console.log('Receiving stream data from', socket.id);
-        io.to('stream').emit('streamData', data);
+    socket.on('streamData', (streamId, data) => {
+        console.log('Receiving stream data for stream', streamId);
+        io.to(streamId).emit('streamData', data);
     });
 
     socket.on('disconnect', () => {
         console.log('User disconnected', socket.id);
-        usersCount--;
-        io.emit('users count', usersCount);
-        // Clean up userLikes for the disconnected user
-        Object.keys(userLikes).forEach(userId => {
-            if (userLikes[userId] && userId === socket.id) {
-                if (userLikes[userId] === 'like') {
-                    likeCount--;
-                } else if (userLikes[userId] === 'dislike') {
-                    dislikeCount--;
-                }
-                delete userLikes[userId];
+        Object.keys(streams).forEach(streamId => {
+            if (io.sockets.adapter.rooms.get(streamId)) {
+                streams[streamId].userCount--;
+                io.to(streamId).emit('users count', streams[streamId].userCount);
             }
         });
-        io.to('stream').emit('like', likeCount);
-        io.to('stream').emit('dislike', dislikeCount);
     });
-});
-
-app.post('/like', (req, res) => {
-    console.log('Like endpoint hit');
-    likeCount++;
-    io.emit('like', likeCount);  // Emit like count to all connected clients
-    res.status(200).send('Like recorded');
-});
-
-app.post('/dislike', (req, res) => {
-    console.log('Dislike endpoint hit');
-    dislikeCount++;
-    io.emit('dislike', dislikeCount);  // Emit dislike count to all connected clients
-    res.status(200).send('Dislike recorded');
 });
 
 const PORT = process.env.PORT || 5000;
